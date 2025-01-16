@@ -689,12 +689,14 @@ class AudioPlayer {
   Future<Duration?> setUrl(
     String url, {
     Map<String, String>? headers,
+    Map<String, dynamic>? body,
     Duration? initialPosition,
     bool preload = true,
     dynamic tag,
   }) =>
       setAudioSource(
-          AudioSource.uri(Uri.parse(url), headers: headers, tag: tag),
+          AudioSource.uri(Uri.parse(url),
+              headers: headers, body: body, tag: tag),
           initialPosition: initialPosition,
           preload: preload);
 
@@ -2094,6 +2096,7 @@ class _ProxyHttpServer {
     _handlerMap[path] = _proxyHandlerForUri(
       uri,
       headers: headers,
+      body: source.body,
       userAgent: source._player?._userAgent,
     );
     return uri.replace(
@@ -2232,17 +2235,22 @@ abstract class AudioSource {
   /// provided by that package. If you wish to have more control over the tag
   /// for background audio purposes, consider using the plugin audio_service
   /// instead of just_audio_background.
-  static UriAudioSource uri(Uri uri,
-      {Map<String, String>? headers, dynamic tag}) {
+  static UriAudioSource uri(
+    Uri uri, {
+    Map<String, String>? headers,
+    Map<String, dynamic>? body,
+    dynamic tag,
+  }) {
     bool hasExtension(Uri uri, String extension) =>
         uri.path.toLowerCase().endsWith('.$extension') ||
         uri.fragment.toLowerCase().endsWith('.$extension');
     if (hasExtension(uri, 'mpd')) {
-      return DashAudioSource(uri, headers: headers, tag: tag);
+      return DashAudioSource(uri, headers: headers, tag: tag, body: body);
     } else if (hasExtension(uri, 'm3u8')) {
-      return HlsAudioSource(uri, headers: headers, tag: tag);
+      return HlsAudioSource(uri, headers: headers, tag: tag, body: body);
     } else {
-      return ProgressiveAudioSource(uri, headers: headers, tag: tag);
+      return ProgressiveAudioSource(uri,
+          headers: headers, tag: tag, body: body);
     }
   }
 
@@ -2329,9 +2337,11 @@ abstract class IndexedAudioSource extends AudioSource {
 abstract class UriAudioSource extends IndexedAudioSource {
   final Uri uri;
   final Map<String, String>? headers;
+  final Map<String, dynamic>? body;
   Uri? _overrideUri;
 
-  UriAudioSource(this.uri, {this.headers, dynamic tag, Duration? duration})
+  UriAudioSource(this.uri,
+      {this.headers, this.body, dynamic tag, Duration? duration})
       : super(tag: tag, duration: duration);
 
   /// If [uri] points to an asset, this gives us [_overrideUri] which is the URI
@@ -2431,6 +2441,7 @@ class ProgressiveAudioSource extends UriAudioSource {
     super.headers,
     super.tag,
     super.duration,
+    super.body,
     this.options,
   });
 
@@ -2460,8 +2471,11 @@ class ProgressiveAudioSource extends UriAudioSource {
 /// your device to forward HTTP requests with headers included.
 class DashAudioSource extends UriAudioSource {
   DashAudioSource(Uri uri,
-      {Map<String, String>? headers, dynamic tag, Duration? duration})
-      : super(uri, headers: headers, tag: tag, duration: duration);
+      {Map<String, String>? headers,
+      Map<String, dynamic>? body,
+      dynamic tag,
+      Duration? duration})
+      : super(uri, headers: headers, body: body, tag: tag, duration: duration);
 
   @override
   AudioSourceMessage _toMessage() => DashAudioSourceMessage(
@@ -2487,8 +2501,11 @@ class DashAudioSource extends UriAudioSource {
 /// your device to forward HTTP requests with headers included.
 class HlsAudioSource extends UriAudioSource {
   HlsAudioSource(Uri uri,
-      {Map<String, String>? headers, dynamic tag, Duration? duration})
-      : super(uri, headers: headers, tag: tag, duration: duration);
+      {Map<String, String>? headers,
+      Map<String, dynamic>? body,
+      dynamic tag,
+      Duration? duration})
+      : super(uri, headers: headers, body: body, tag: tag, duration: duration);
 
   @override
   AudioSourceMessage _toMessage() => HlsAudioSourceMessage(
@@ -2888,6 +2905,7 @@ class LockCachingAudioSource extends StreamAudioSource {
   Future<HttpClientResponse>? _response;
   final Uri uri;
   final Map<String, String>? headers;
+  final Map<String, dynamic>? body;
   final Future<File> cacheFile;
   int _progress = 0;
   final _requests = <_StreamingByteRangeRequest>[];
@@ -2904,6 +2922,7 @@ class LockCachingAudioSource extends StreamAudioSource {
     this.uri, {
     this.headers,
     File? cacheFile,
+    this.body,
     dynamic tag,
   })  : cacheFile =
             cacheFile != null ? Future.value(cacheFile) : _getCacheFile(uri),
@@ -2920,7 +2939,9 @@ class LockCachingAudioSource extends StreamAudioSource {
   /// exists, otherwise returns `this`. This can be
   Future<IndexedAudioSource> resolve() async {
     final file = await cacheFile;
-    return await file.exists() ? AudioSource.uri(Uri.file(file.path)) : this;
+    return await file.exists()
+        ? AudioSource.uri(Uri.file(file.path), body: body)
+        : this;
   }
 
   /// Emits the current download progress as a double value from 0.0 (nothing
@@ -2992,11 +3013,12 @@ class LockCachingAudioSource extends StreamAudioSource {
         partialCacheFile.existsSync() ? partialCacheFile : cacheFile;
 
     final httpClient = _createHttpClient(userAgent: _player?._userAgent);
-    final httpRequest = await _getUrl(httpClient, uri, headers: headers);
+    final httpRequest =
+        await _getUrl(httpClient, uri, headers: headers, body: body);
     final response = await httpRequest.close();
     if (response.statusCode != 200) {
       httpClient.close();
-      throw Exception('HTTP Status Error: ${response.statusCode}');
+      throw Exception('HTTP Status Error: ${response.statusCode}, $uri');
     }
     (await _partialCacheFile).createSync(recursive: true);
     // TODO: Should close sink after done, but it throws an error.
@@ -3109,7 +3131,7 @@ class LockCachingAudioSource extends StreamAudioSource {
         final httpClient = _createHttpClient(userAgent: _player?._userAgent);
 
         final rangeRequest = _HttpRangeRequest(start, end);
-        _getUrl(httpClient, uri, headers: {
+        _getUrl(httpClient, uri, body: body, headers: {
           if (headers != null) ...headers!,
           HttpHeaders.rangeHeader: rangeRequest.header,
         }).then((httpRequest) async {
@@ -3330,6 +3352,7 @@ _ProxyHandler _proxyHandlerForSource(StreamAudioSource source) {
 _ProxyHandler _proxyHandlerForUri(
   Uri uri, {
   Map<String, String>? headers,
+  Map<String, dynamic>? body,
   String? userAgent,
 }) {
   // Keep redirected [Uri] to speed-up requests
@@ -3344,8 +3367,8 @@ _ProxyHandler _proxyHandlerForUri(
           .forEach((name, value) => requestHeaders[name] = value.join(', '));
       // write supplied headers last (to ensure supplied headers aren't overwritten)
       headers?.forEach((name, value) => requestHeaders[name] = value);
-      final originRequest =
-          await _getUrl(client, redirectedUri ?? uri, headers: requestHeaders);
+      final originRequest = await _getUrl(client, redirectedUri ?? uri,
+          headers: requestHeaders, body: body);
       host = originRequest.headers.value(HttpHeaders.hostHeader);
       final originResponse = await originRequest.close();
       if (originResponse.redirects.isNotEmpty) {
@@ -3377,7 +3400,8 @@ _ProxyHandler _proxyHandlerForUri(
             final rawNestedUri = Uri.parse(line);
             if (rawNestedUri.hasScheme) {
               // Don't propagate headers
-              server.addUriAudioSource(AudioSource.uri(rawNestedUri));
+              server
+                  .addUriAudioSource(AudioSource.uri(rawNestedUri, body: body));
             } else {
               // This is a resource on the same server, so propagate the headers.
               final basePath = rawNestedUri.path.startsWith('/')
@@ -3386,7 +3410,7 @@ _ProxyHandler _proxyHandlerForUri(
               final nestedUri =
                   uri.replace(path: '$basePath${rawNestedUri.path}');
               server.addUriAudioSource(
-                  AudioSource.uri(nestedUri, headers: headers));
+                  AudioSource.uri(nestedUri, headers: headers, body: body));
             }
           } catch (e) {
             // ignore malformed lines
@@ -4003,12 +4027,15 @@ enum PositionDiscontinuityReason {
 }
 
 Future<HttpClientRequest> _getUrl(HttpClient client, Uri uri,
-    {Map<String, String>? headers}) async {
-  final request = await client.getUrl(uri);
+    {Map<String, String>? headers, Map<String, dynamic>? body}) async {
+  final request =
+      body != null ? await client.postUrl(uri) : await client.getUrl(uri);
+  String? bodyJsonString = body != null ? jsonEncode(body) : null;
   if (headers != null) {
     final host = request.headers.value(HttpHeaders.hostHeader);
     request.headers.clear();
-    request.headers.set(HttpHeaders.contentLengthHeader, '0');
+    request.headers
+        .set(HttpHeaders.contentLengthHeader, bodyJsonString?.length ?? 0);
     headers.forEach((name, value) => request.headers.set(name, value));
     if (host != null) {
       request.headers.set(HttpHeaders.hostHeader, host);
@@ -4017,8 +4044,10 @@ Future<HttpClientRequest> _getUrl(HttpClient client, Uri uri,
       request.headers.set(HttpHeaders.userAgentHeader, client.userAgent!);
     }
   }
+
   // Match ExoPlayer's native behavior
   request.maxRedirects = 20;
+  request.write(bodyJsonString);
   return request;
 }
 
