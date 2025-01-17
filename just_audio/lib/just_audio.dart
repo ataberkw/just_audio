@@ -3418,14 +3418,26 @@ _ProxyHandler _proxyHandlerForUri(
         }
         request.response.add(utf8.encode(m3u8));
       } else {
+        final fileName =
+            '${const Uuid().v5(Uuid.NAMESPACE_NIL, uri.toString())}.mp3';
+        final file = File(p.join(
+          (await getApplicationCacheDirectory()).path,
+          fileName,
+        ));
+
         request.response.bufferOutput = false;
         var done = false;
         request.response.done.then((dynamic _) => done = true);
+        List<int> buffer = [];
         await for (var chunk in originResponse) {
           if (done) break;
+
+          buffer.addAll(chunk);
           request.response.add(chunk);
           await request.response.flush();
         }
+
+        file.writeAsBytesSync(buffer, mode: FileMode.write);
       }
       await request.response.flush();
       await request.response.close();
@@ -3468,6 +3480,8 @@ _ProxyHandler _proxyHandlerForUri(
         await socket.flush();
         await done.future;
       }
+    } catch (e) {
+      debugPrint("Error: $e");
     }
   }
 
