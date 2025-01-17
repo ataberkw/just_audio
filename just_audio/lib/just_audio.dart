@@ -2939,9 +2939,8 @@ class LockCachingAudioSource extends StreamAudioSource {
   /// exists, otherwise returns `this`. This can be
   Future<IndexedAudioSource> resolve() async {
     final file = await cacheFile;
-    return await file.exists()
-        ? AudioSource.uri(Uri.file(file.path), body: body)
-        : this;
+    // Don't pass body. Because we don't want to POST request to the cache file.
+    return await file.exists() ? AudioSource.uri(Uri.file(file.path)) : this;
   }
 
   /// Emits the current download progress as a double value from 0.0 (nothing
