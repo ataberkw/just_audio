@@ -3017,7 +3017,8 @@ class LockCachingAudioSource extends StreamAudioSource {
     final response = await httpRequest.close();
     if (response.statusCode != 200) {
       httpClient.close();
-      throw Exception('HTTP Status Error: ${response.statusCode}, $uri');
+      throw Exception(
+          'HTTP Status Error: ${response.statusCode}, $uri, ${response.reasonPhrase}');
     }
     (await _partialCacheFile).createSync(recursive: true);
     // TODO: Should close sink after done, but it throws an error.
@@ -4030,11 +4031,13 @@ Future<HttpClientRequest> _getUrl(HttpClient client, Uri uri,
   final request =
       body != null ? await client.postUrl(uri) : await client.getUrl(uri);
   String? bodyJsonString = body != null ? jsonEncode(body) : null;
+  Uint8List? encodedBody =
+      bodyJsonString != null ? utf8.encode(bodyJsonString) : null;
   if (headers != null) {
     final host = request.headers.value(HttpHeaders.hostHeader);
     request.headers.clear();
     request.headers
-        .set(HttpHeaders.contentLengthHeader, bodyJsonString?.length ?? 0);
+        .set(HttpHeaders.contentLengthHeader, encodedBody?.length ?? 0);
     headers.forEach((name, value) => request.headers.set(name, value));
     if (host != null) {
       request.headers.set(HttpHeaders.hostHeader, host);
@@ -4046,7 +4049,7 @@ Future<HttpClientRequest> _getUrl(HttpClient client, Uri uri,
 
   // Match ExoPlayer's native behavior
   request.maxRedirects = 20;
-  request.write(bodyJsonString);
+  if (encodedBody != null) request.add(encodedBody);
   return request;
 }
 
