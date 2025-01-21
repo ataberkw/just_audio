@@ -3437,7 +3437,9 @@ _ProxyHandler _proxyHandlerForUri(
           await request.response.flush();
         }
 
-        file.writeAsBytesSync(buffer, mode: FileMode.write);
+        if (originResponse.statusCode == 200) {
+          await file.writeAsBytes(buffer, mode: FileMode.write);
+        }
       }
       await request.response.flush();
       await request.response.close();
